@@ -404,8 +404,15 @@ bool CreatePalette()
 	if (!loadResult1) return ReportError("Error: Failed to load image '%s'!", REFIMAGE1);
 	if (!loadResult2) return ReportError("Error: Failed to load image '%s'!", REFIMAGE2);
 
-	ilBindImage(ImageName1);	//iluScale(width2, height2, 1);		width1 = ilGetInteger(IL_IMAGE_WIDTH);
-	height1 = ilGetInteger(IL_IMAGE_HEIGHT);	//pImageData1 = ilGetData();	ReportError("\tImage1 = %d x %d", width1, height1);	ReportError("\tImage2 = %d x %d", width2, height2);
+	ilBindImage(ImageName1);
+	//iluScale(width2, height2, 1);
+	
+	width1 = ilGetInteger(IL_IMAGE_WIDTH);
+	height1 = ilGetInteger(IL_IMAGE_HEIGHT);
+	//pImageData1 = ilGetData();
+
+	ReportError("\tImage1 = %d x %d", width1, height1);
+	ReportError("\tImage2 = %d x %d", width2, height2);
 
 	size_t imageSize = width1 * height2;
 	ILubyte* pData1 = pImageData1;
