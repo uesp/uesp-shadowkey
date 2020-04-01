@@ -43,5 +43,8 @@
     <Library Include="..\..\..\EsoApps\common\devil\lib\ILUT.lib">
       <Filter>Source Files</Filter>
     </Library>
+    <Library Include="..\..\..\EsoApps\common\zlib\zdll.lib">
+      <Filter>Source Files</Filter>
+    </Library>
   </ItemGroup>
 </Project>

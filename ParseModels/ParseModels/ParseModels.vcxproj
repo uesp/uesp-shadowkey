@@ -71,14 +71,14 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>D:\src\uesp\EsoApps\common\devil\include;$(IncludePath)</IncludePath>
+    <IncludePath>D:\src\uesp\EsoApps\common\devil\include;D:\src\uesp\EsoApps\common\zlib;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>D:\src\uesp\EsoApps\common\devil\include;$(IncludePath)</IncludePath>
+    <IncludePath>D:\src\uesp\EsoApps\common\devil\include;D:\src\uesp\EsoApps\common\zlib;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
@@ -163,6 +163,7 @@
     <Library Include="..\..\..\EsoApps\common\devil\lib\DevIL.lib" />
     <Library Include="..\..\..\EsoApps\common\devil\lib\ILU.lib" />
     <Library Include="..\..\..\EsoApps\common\devil\lib\ILUT.lib" />
+    <Library Include="..\..\..\EsoApps\common\zlib\zdll.lib" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -15,6 +15,7 @@
 #include "d:\\src\uesp\\EsoApps\\common\\devil\\include\\IL\\il.h"
 #include "d:\\src\uesp\\EsoApps\\common\\devil\\include\\IL\\ilu.h"
 #include "d:\\src\uesp\\EsoApps\\common\\devil\\include\\IL\\ilut.h"
+#include "zlib.h"
 
 
 typedef uint32_t dword;
@@ -25,6 +26,13 @@ typedef uint16_t word;
 #define MODELSHUGE  "c:\\downloads\\Shadowkey\\Shadowkey Release\\system\\apps\\6r51\\models.huge"
 #define MODELSTXT   "c:\\downloads\\Shadowkey\\Shadowkey Release\\system\\apps\\6r51\\models.txt"
 #define MODELOUTPUTPATH "c:\\downloads\\Shadowkey\\models\\"
+#define TEXTUREOUTPUTPATH "c:\\downloads\\Shadowkey\\ZippedTextures\\"
+#define BITMAPOUTPUTPATH "c:\\downloads\\Shadowkey\\ZippedBmps\\"
+#define ZIPPEDOUTPUTPATH "c:\\downloads\\Shadowkey\\Zipped\\"
+#define MODELINPUTPATH    "c:\\downloads\\Shadowkey\\Shadowkey Release\\system\\apps\\6r51\\"
+#define MODELZTXFILESPEC  "c:\\downloads\\Shadowkey\\Shadowkey Release\\system\\apps\\6r51\\*.ztx"
+#define MODELZMPFILESPEC  "c:\\downloads\\Shadowkey\\Shadowkey Release\\system\\apps\\6r51\\*.zmp"
+#define MODELZFILESPEC    "c:\\downloads\\Shadowkey\\Shadowkey Release\\system\\apps\\6r51\\*.z??"
 
 
 const size_t MODEL_REC1_SIZE = 6;
@@ -189,6 +197,63 @@ bool ParseWord(const byte* pData, word&  Output, const bool LittleEndian = true)
 	memcpy((void *)&Output, pData, sizeof(word));
 	
 	if (!LittleEndian) Output = WordSwap(Output);
+	return true;
+}
+
+
+bool HasExtension(const char* pFilename, const char* pExtension)
+{
+	size_t extSize = strlen(pExtension);
+	size_t filenameSize = strlen(pFilename);
+
+	if (filenameSize < extSize) return false;
+
+	return _strnicmp(pFilename + filenameSize - extSize, pExtension, extSize) == 0;
+}
+
+
+bool InflateZlibBlock(byte* pOutputData, dword &OutputSize, const size_t MaxOutputSize, const byte* pInputData, const size_t InputSize, const bool Quiet = false)
+{
+	z_stream Stream;
+	int Result;
+
+	Stream.zalloc = Z_NULL;
+	Stream.zfree = Z_NULL;
+	Stream.opaque = Z_NULL;
+	Stream.avail_in = 0;
+	Stream.next_in = Z_NULL;
+
+	Result = inflateInit(&Stream);
+	if (Result != Z_OK) return Quiet ? false : ReportError("Error: Failed to initialize the zlib stream!");
+
+	Stream.avail_in = InputSize;
+	Stream.avail_out = MaxOutputSize;
+	Stream.next_out = pOutputData;
+	Stream.next_in = (byte *)pInputData;
+
+	/* Decompress until deflate stream ends or end of block data */
+	do {
+		Result = inflate(&Stream, Z_NO_FLUSH);
+
+		switch (Result) {
+		case Z_BUF_ERROR:
+			if (Stream.avail_in == 0) Result = Z_STREAM_END;
+			break;
+		case Z_NEED_DICT:
+			Result = Z_DATA_ERROR;     /* and fall through */
+		case Z_DATA_ERROR:
+		case Z_MEM_ERROR:
+		case Z_STREAM_ERROR:
+			//case Z_BUF_ERROR:
+			OutputSize = Stream.total_out;
+			inflateEnd(&Stream);
+			return Quiet ? false : ReportError("Error: Failed to uncompress data stream!");
+		};
+
+	} while (Result != Z_STREAM_END);
+
+	OutputSize = Stream.total_out;
+	inflateEnd(&Stream);
 	return true;
 }
 
@@ -592,6 +657,18 @@ void TranslateColorWord(byte& r, byte& g, byte& b, const byte* pTexture)
 }
 
 
+dword TranslateColorIndex(byte& r, byte& g, byte& b, byte index, byte* pPalettte = nullptr)
+{
+	if (pPalettte == nullptr) return -1;
+
+	r = pPalettte[index * 3 + 0];
+	g = pPalettte[index * 3 + 1];
+	b = pPalettte[index * 3 + 2];
+
+	return (dword)r + ((dword)g << 8) + ((dword)b << 16);
+}
+
+
 bool ExportTexture(const byte* pTexture, const dword width, const dword height, const dword modelIndex, const dword textureIndex, const std::string name)
 {
 	if (height == 0 || width == 0) return true;
@@ -652,11 +729,182 @@ bool ExportTextures()
 }
 
 
+bool ParseZtx(const byte* pData, const dword Size, const char* pFullFilename)
+{
+	if (Size <= 0) return true;
+
+	dword numTextures = (dword) pData[0];
+	size_t offset = 1;
+	size_t width = 0x40*2;
+	size_t height = 0x40/2;
+	size_t imageSize = width * height;
+	char Drive[10], Dir[256], Filename[256], Extension[16];
+	char palFilename[256];
+
+	_splitpath(pFullFilename, Drive, Dir, Filename, Extension);
+	snprintf(palFilename, 255, "%s%s%s", MODELINPUTPATH, Filename, ".pal");
+
+	FILE* pFile = fopen(palFilename, "rb");
+	if (pFile == nullptr) return ReportError("Error: Failed to open palette file '%s' for reading!", palFilename);
+	byte PalData[768];
+	size_t bytesRead = fread(PalData, 1, 768, pFile);
+	fclose(pFile);
+	if (bytesRead != 768) return ReportError("Error: Only read %d of %d bytes from open palette file '%s' for reading!", bytesRead, 768, palFilename);
+
+	byte r, g, b;
+	byte index;
+	byte* pOutputImage = new byte[height * width * 4 + 1024];
+	
+	for (dword i = 0; i < numTextures; ++i)
+	{
+		if (offset + imageSize > Size) return ReportError("Error: Buffer overflow in parsing ZTX texture #%d at offset 0x%X!", i, offset);
+
+		for (size_t y = 0; y < height; ++y)
+		{
+			for (size_t x = 0; x < width; ++x)
+			{
+				if (offset > Size) return ReportError("Error: Buffer overflow in parsing ZTX texture #%d at offset 0x%X!", i, offset);
+
+				index = pData[offset];
+				++offset;
+
+				TranslateColorIndex(r, g, b, index, PalData);
+
+				byte alpha = 0xff;
+
+				if (r == 0xff && g == 0 && b == 0xff) alpha = 0;
+
+				size_t imageOffset = (height - y - 1) * width * 4 + x * 4;
+				//imageOffset = y * width * 4 + x * 4;
+
+				pOutputImage[imageOffset + 0] = r;
+				pOutputImage[imageOffset + 1] = g;
+				pOutputImage[imageOffset + 2] = b;
+				pOutputImage[imageOffset + 3] = alpha;
+			}
+		}
+
+		char OutputFilename[256];
+		snprintf(OutputFilename, 255, "%s%s-%d.png", TEXTUREOUTPUTPATH, Filename, i);
+		printf("%s\n", OutputFilename);
+		ilTexImage(width, height, 1, 4, IL_RGBA, IL_UNSIGNED_BYTE, pOutputImage);
+		ilSave(IL_PNG, OutputFilename);
+
+		//offset += imageSize;
+	}
+
+	return true;
+}
+
+
+bool DecompressZFile(const char* pFilename, const char* pOutputPath)
+{
+	char inputFilename[256];
+	char outputFilename[256];
+	dword decompressedSize;
+
+	snprintf(inputFilename,  255, "%s%s", MODELINPUTPATH, pFilename);
+	snprintf(outputFilename, 255, "%s%s", pOutputPath, pFilename);
+
+	FILE* pInputFile = fopen(inputFilename, "rb");
+	if (pInputFile == nullptr) return ReportError("Error: Failed to open file '%s' for reading!", inputFilename);
+
+	fseek(pInputFile, 0, SEEK_END);
+	dword compressedSize = ftell(pInputFile) - 4;
+	fseek(pInputFile, 0, SEEK_SET);
+	
+	if (!ReadDword(pInputFile, decompressedSize)) return ReportError("Error: Failed to read 4 bytes from file '%s'!", inputFilename);
+
+	byte* pCompressedData = new byte[compressedSize + 1000];
+	byte* pDecompressedData = new byte[decompressedSize + 1000];
+
+	size_t bytesRead = fread(pCompressedData, 1, compressedSize, pInputFile);
+	if (bytesRead != compressedSize) return ReportError("Error: Only read %d of %d bytes from file '%s'!", bytesRead, compressedSize, inputFilename);
+	
+	fclose(pInputFile);
+
+	dword decompressSizeResult = 0;
+	bool compressResult = InflateZlibBlock(pDecompressedData, decompressSizeResult, decompressedSize + 500, pCompressedData, compressedSize);
+	if (!compressResult) return ReportError("Error: Failed to decompressed file '%s'!", inputFilename);
+
+	FILE* pOutputFile = fopen(outputFilename, "wb");
+	if (pOutputFile == nullptr) return ReportError("Error: Failed to open file '%s' for output!", outputFilename);
+
+	fwrite(pDecompressedData, 1, decompressSizeResult, pOutputFile);
+	fclose(pOutputFile);
+
+	if (HasExtension(outputFilename, ".ztx"))
+	{
+		ParseZtx(pDecompressedData, decompressSizeResult, inputFilename);
+	}
+
+	delete[] pCompressedData;
+	delete[] pDecompressedData;
+
+	printf("Successfully decompressed file '%s'.\n", inputFilename);
+	return true;
+}
+
+
+bool DecompressZtx()
+{
+	WIN32_FIND_DATA FindData;
+	HANDLE hFind = FindFirstFile(MODELZTXFILESPEC, &FindData);
+	
+	if (hFind == INVALID_HANDLE_VALUE) return ReportError("Error: No files matching '%s' found!", MODELZTXFILESPEC);
+
+	do {
+		DecompressZFile(FindData.cFileName, TEXTUREOUTPUTPATH);
+	} while (FindNextFile(hFind, &FindData));
+
+	FindClose(hFind);
+	return true;
+}
+
+
+
+bool DecompressZmp()
+{
+	WIN32_FIND_DATA FindData;
+	HANDLE hFind = FindFirstFile(MODELZMPFILESPEC, &FindData);
+
+	if (hFind == INVALID_HANDLE_VALUE) return ReportError("Error: No files matching '%s' found!", MODELZMPFILESPEC);
+
+	do {
+		DecompressZFile(FindData.cFileName, BITMAPOUTPUTPATH);
+	} while (FindNextFile(hFind, &FindData));
+
+	FindClose(hFind);
+	return true;
+}
+
+
+bool DecompressAll()
+{
+	WIN32_FIND_DATA FindData;
+	HANDLE hFind = FindFirstFile(MODELZFILESPEC, &FindData);
+
+	if (hFind == INVALID_HANDLE_VALUE) return ReportError("Error: No files matching '%s' found!", MODELZFILESPEC);
+
+	do {
+		DecompressZFile(FindData.cFileName, ZIPPEDOUTPUTPATH);
+	} while (FindNextFile(hFind, &FindData));
+
+	FindClose(hFind);
+	return true;
+}
+
+
 int main()
 {
 	ilInit();
 	iluInit();
 	ilEnable(IL_FILE_OVERWRITE);
+
+	DecompressZtx();
+	//DecompressZmp();
+	//DecompressAll();
+	return true;
 	
 	LoadModelIndex();
 	LoadModelData();
